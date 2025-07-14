@@ -5,9 +5,11 @@
 package config
 
 import (
+	_ "embed"
 	"os"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 var yamlString = `
@@ -217,17 +219,11 @@ var configTests = []struct {
 
 func TestYamlConfig(t *testing.T) {
 	cfg, err := ParseYaml(yamlString)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 	str, err := RenderYaml(cfg.Root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 	cfg, err = ParseYaml(str)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 	testConfig(t, cfg)
 }
 
@@ -253,29 +249,39 @@ func TestSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	val := "test"
-	err = cfg.Set("map.key8", val)
+	_ = cfg.Set("map.key8", val)
 	if v, _ := cfg.String("map.key8"); v != val {
 		t.Errorf(`%s(%T) != "%s(%T)"`, v, v, val, val)
 	}
 }
 
+func TestMust(t *testing.T) {
+	t.Run("should return config", func(t *testing.T) {
+		cfg := Must(ParseYaml(yamlString))
+		assert.NotNil(t, cfg)
+	})
+
+	t.Run("should panic", func(t *testing.T) {
+		assert.Panics(t, func() {
+			Must(nil, assert.AnError)
+		})
+	})
+}
+
 func TestSetUnexistingValue(t *testing.T) {
 	cfg, err := ParseYaml(yamlString)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 
 	val := "test"
-
-	err = cfg.Set("some.one", val)
+	_ = cfg.Set("some.one", val)
 	v, _ := cfg.String("some.one")
-	expect(t, v, val)
+	assert.Equal(t, val, v)
 
-	err = cfg.Set("some.thing.10", val)
+	_ = cfg.Set("some.thing.10", val)
 	v, _ = cfg.String("some.thing.10")
-	expect(t, v, val)
+	assert.Equal(t, val, v)
 	// try to set by string key into slice
-	expect(t, cfg.Set("some.thing.more", val) != nil, true)
+	assert.True(t, cfg.Set("some.thing.more", val) != nil)
 }
 
 func TestEnv(t *testing.T) {
@@ -284,8 +290,8 @@ func TestEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	val := "test"
-	cfg.Set("map.key8", "should be overwritten")
-	os.Setenv("MAP_KEY8", val)
+	_ = cfg.Set("map.key8", "should be overwritten")
+	_ = os.Setenv("MAP_KEY8", val)
 	cfg.Env()
 	test, _ := cfg.String("map.key8")
 	if test != val {
@@ -299,8 +305,8 @@ func TestEnvPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	val := "test"
-	cfg.Set("map.key8", "should be overwritten")
-	os.Setenv("PREFIX_MAP_KEY8", val)
+	_ = cfg.Set("map.key8", "should be overwritten")
+	_ = os.Setenv("PREFIX_MAP_KEY8", val)
 	cfg.EnvPrefix("prefix")
 	test, _ := cfg.String("map.key8")
 	if test != val {
@@ -334,29 +340,28 @@ func TestUMethods(t *testing.T) {
 	}
 
 	// UString
-	expect(t, cfg.UString("map.key8"), "value8")
-	expect(t, cfg.UString("map.key8", "default"), "value8")
-	expect(t, cfg.UString("map.undefined", "default"), "default")
-	expect(t, cfg.UString("map.undefined"), "")
+	assert.Equal(t, "value8", cfg.UString("map.key8"))
+	assert.Equal(t, "value8", cfg.UString("map.key8", "default"))
+	assert.Equal(t, "default", cfg.UString("map.undefined", "default"))
+	assert.Equal(t, "", cfg.UString("map.undefined"))
 
 	// UBool
-	expect(t, cfg.UBool("map.key0"), true)
-	expect(t, cfg.UBool("map.key0", false), true)
-	expect(t, cfg.UBool("map.undefined", true), true)
-	expect(t, cfg.UBool("map.undefined"), false)
+	assert.Equal(t, true, cfg.UBool("map.key0"))
+	assert.Equal(t, true, cfg.UBool("map.key0", false))
+	assert.Equal(t, true, cfg.UBool("map.undefined", true))
+	assert.Equal(t, false, cfg.UBool("map.undefined"))
 
 	// UFloat64
-	expect(t, cfg.UFloat64("map.key4"), float64(4.2))
-	expect(t, cfg.UFloat64("map.key4", float64(1)), float64(4.2))
-	expect(t, cfg.UFloat64("map.undefined", float64(0.99)), float64(0.99))
-	expect(t, cfg.UFloat64("map.undefined"), float64(0))
+	assert.Equal(t, 4.2, cfg.UFloat64("map.key4"))
+	assert.Equal(t, 4.2, cfg.UFloat64("map.key4", float64(1)))
+	assert.Equal(t, 0.99, cfg.UFloat64("map.undefined", 0.99))
+	assert.Equal(t, float64(0), cfg.UFloat64("map.undefined"))
 
 	// UInt
-	expect(t, cfg.UInt("map.key6"), 42)
-	expect(t, cfg.UInt("map.key6", 37), 42)
-	expect(t, cfg.UInt("map.undefined", 37), 37)
-	expect(t, cfg.UInt("map.undefined"), 0)
-
+	assert.Equal(t, 42, cfg.UInt("map.key6"))
+	assert.Equal(t, 42, cfg.UInt("map.key6", 37))
+	assert.Equal(t, 37, cfg.UInt("map.undefined", 37))
+	assert.Equal(t, 0, cfg.UInt("map.undefined"))
 }
 
 func TestCopy(t *testing.T) {
@@ -366,70 +371,92 @@ func TestCopy(t *testing.T) {
 	}
 
 	cfg2, err := cfg.Copy()
-	expect(t, err, nil)
-	cfg2.Set("map.key6", 43)
+	assert.NoError(t, err)
+	_ = cfg2.Set("map.key6", 43)
 
 	yaml1, _ := RenderYaml(cfg.Root)
 	yaml2, _ := RenderYaml(cfg2.Root)
 
-	expect(t, yaml2 == yaml1, false)
+	assert.False(t, yaml2 == yaml1)
 
 	cfg3, err := cfg.Copy("config", "server")
-	expect(t, err, nil)
+	assert.NoError(t, err)
 	cfg4, err := cfg.Copy("config.server")
-	expect(t, err, nil)
+	assert.NoError(t, err)
 
-	expect(t, cfg3.UString("0"), "www.google.com")
-	expect(t, cfg4.UString("0"), "www.google.com")
+	assert.Equal(t, "www.google.com", cfg3.UString("0"))
+	assert.Equal(t, "www.google.com", cfg4.UString("0"))
 
 	yaml3, _ := RenderYaml(cfg3.Root)
 	yaml4, _ := RenderYaml(cfg4.Root)
-	expect(t, yaml3, yaml4)
+	assert.Equal(t, yaml3, yaml4)
 }
 
 func TestExtendError(t *testing.T) {
 	cfg, err := ParseYaml(yamlString)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 	cfg2, err := ParseYaml(`
 list:
   key0: true
 map:
   - true
 `)
-	var nilCfg *Config
+	assert.NoError(t, err)
+
 	extended, err := cfg.Extend(cfg2)
-	expect(t, extended, nilCfg)
-	expect(t, err.Error(), "Invalid list index at \"list.key0\"")
+	assert.Error(t, err)
+	assert.Nil(t, extended)
+	assert.Equal(t, "invalid list index at \"key0\"", err.Error())
+}
+
+var (
+	//go:embed testdata/default.yml
+	defaultYML []byte
+	//go:embed testdata/dev.yml
+	devYML []byte
+)
+
+func TestExtendFromFile(t *testing.T) {
+	cfg, err := ParseYamlBytes(defaultYML)
+	assert.NoError(t, err)
+	assert.Equal(t, "default", cfg.UString("app.env"))
+	assert.Equal(t, "id-0", cfg.UString("app.ids.0"))
+
+	cfg2, err := ParseYamlBytes(devYML)
+	assert.NoError(t, err)
+	assert.Equal(t, "dev", cfg2.UString("app.env"))
+	assert.Equal(t, "id-10", cfg2.UString("app.ids.0"))
+
+	extended, err := cfg.Extend(cfg2)
+	assert.NoError(t, err)
+	assert.Equal(t, "dev", extended.UString("app.env"))
+	assert.Equal(t, "id-10", extended.UString("app.ids.0"))
+	assert.Equal(t, "id-50", extended.UString("app.ids.4"))
+	assert.Equal(t, "id-5", extended.UString("app.ids.5"))
 }
 
 func TestExtend(t *testing.T) {
 	cfg, err := ParseYaml(yamlString)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
+	assert.True(t, cfg.UBool("map.key0"))
+	assert.True(t, cfg.UBool("list.0"))
+
 	cfg2, err := ParseYaml(`
 map:
   key0: extend
 list:
   - extend
 `)
+	assert.NoError(t, err)
+	assert.Equal(t, "not found", cfg2.UString("map.key8", "not found"))
+	assert.Equal(t, 7, cfg2.UInt("list.8", 7))
 
 	extended, err := cfg.Extend(cfg2)
-	expect(t, err, nil)
-	// immutable
-	expect(t, cfg.UBool("map.key0"), true)
-	expect(t, cfg.UBool("list.0"), true)
-
-	expect(t, cfg2.UString("map.key8", "not found"), "not found")
-	expect(t, cfg2.UInt("list.8", 7), 7)
-
-	// result
-	expect(t, extended.UString("map.key0"), "extend")
-	expect(t, extended.UString("map.key8"), "value8")
-	expect(t, extended.UString("list.0"), "extend")
-	expect(t, extended.UString("list.8"), "item8")
+	assert.NoError(t, err)
+	assert.Equal(t, "extend", extended.UString("map.key0"))
+	assert.Equal(t, "value8", extended.UString("map.key8"))
+	assert.Equal(t, "extend", extended.UString("list.0"))
+	assert.Equal(t, "item8", extended.UString("list.8"))
 }
 
 func TestComplexYamlKeys(t *testing.T) {
@@ -443,14 +470,14 @@ root:
     field5: value5
     field.6: value6
 `)
-	expect(t, err, nil)
+	assert.NoError(t, err)
 
 	// result
-	expect(t, cfg.UString("root.field1"), "value1")
-	expect(t, cfg.UString("root.[field.something.2]"), "value2")
-	expect(t, cfg.UString("root.field number 3.field4"), "value3")
-	expect(t, cfg.UString("root.[field.something.4].field5"), "value5")
-	expect(t, cfg.UString("root.[field.something.4].[field.6]"), "value6")
+	assert.Equal(t, "value1", cfg.UString("root.field1"))
+	assert.Equal(t, "value2", cfg.UString("root.[field.something.2]"))
+	assert.Equal(t, "value3", cfg.UString("root.field number 3.field4"))
+	assert.Equal(t, "value5", cfg.UString("root.[field.something.4].field5"))
+	assert.Equal(t, "value6", cfg.UString("root.[field.something.4].[field.6]"))
 }
 
 func testConfig(t *testing.T, cfg *Config) {
@@ -476,26 +503,17 @@ Loop:
 			continue Loop
 		}
 		if test.ok {
-			if err != nil {
-				t.Errorf(`%s(%q) = "%v", got error: %v`, test.kind, test.path, test.want, err)
-			} else {
-				ok := false
-				switch test.kind {
-				case "List":
-					ok = equalList(got, test.want)
-				case "Map":
-					ok = equalMap(got, test.want)
-				default:
-					ok = got == test.want
-				}
-				if !ok {
-					t.Errorf(`%s(%q) = "%v", want "%v"`, test.kind, test.path, test.want, got)
-				}
+			assert.NoError(t, err, "expected %s(%q) to succeed with value %v", test.kind, test.path, test.want)
+			switch test.kind {
+			case "List":
+				assert.True(t, equalList(got, test.want), "%s(%q) = %v, want %v", test.kind, test.path, got, test.want)
+			case "Map":
+				assert.True(t, equalMap(got, test.want), "%s(%q) = %v, want %v", test.kind, test.path, got, test.want)
+			default:
+				assert.Equal(t, test.want, got, "%s(%q)", test.kind, test.path)
 			}
 		} else {
-			if err == nil {
-				t.Errorf("%s(%q): expected error", test.kind, test.path)
-			}
+			assert.Error(t, err, "%s(%q): expected error", test.kind, test.path)
 		}
 	}
 }
@@ -532,10 +550,4 @@ func equalMap(m1, m2 interface{}) bool {
 		}
 	}
 	return true
-}
-
-func expect(t *testing.T, a interface{}, b interface{}) {
-	if a != b {
-		t.Errorf("Expected %v (type %v) - Got %v (type %v)", b, reflect.TypeOf(b), a, reflect.TypeOf(a))
-	}
 }

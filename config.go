@@ -9,19 +9,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
-	yaml "gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v2"
 )
-
-// Config ---------------------------------------------------------------------
 
 // Config represents a configuration with convenient access methods.
 type Config struct {
-	Root    interface{}
+	Root    any
 	lastErr error
 }
 
@@ -31,8 +30,8 @@ func (c *Config) Error() error {
 }
 
 // Get returns a nested config according to a dotted path.
-func (cfg *Config) Get(path string) (*Config, error) {
-	n, err := Get(cfg.Root, path)
+func (c *Config) Get(path string) (*Config, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return nil, err
 	}
@@ -40,83 +39,83 @@ func (cfg *Config) Get(path string) (*Config, error) {
 }
 
 // Set a nested config according to a dotted path.
-func (cfg *Config) Set(path string, val interface{}) error {
-	return Set(cfg.Root, path, val)
+func (c *Config) Set(path string, val any) error {
+	return Set(c.Root, path, val)
 }
 
-// Fetch data from system env, based on existing config keys.
-func (cfg *Config) Env() *Config {
-	return cfg.EnvPrefix("")
+// Env fetch data from system env, based on existing config keys.
+func (c *Config) Env() *Config {
+	return c.EnvPrefix("")
 }
 
-// Fetch data from system env using prefix, based on existing config keys.
-func (cfg *Config) EnvPrefix(prefix string) *Config {
+// EnvPrefix fetch data from system env using prefix, based on existing config keys.
+func (c *Config) EnvPrefix(prefix string) *Config {
 	if prefix != "" {
 		prefix = strings.ToUpper(prefix) + "_"
 	}
 
-	keys := getKeys(cfg.Root)
+	keys := getKeys(c.Root)
 	for _, key := range keys {
 		k := strings.ToUpper(strings.Join(key, "_"))
 		if val, exist := syscall.Getenv(prefix + k); exist {
-			cfg.Set(strings.Join(key, "."), val)
+			_ = c.Set(strings.Join(key, "."), val)
 		}
 	}
-	return cfg
+	return c
 }
 
-// Parse command line arguments, based on existing config keys.
-func (cfg *Config) Flag() *Config {
-	keys := getKeys(cfg.Root)
+// Flag parse command line arguments, based on existing config keys.
+func (c *Config) Flag() *Config {
+	keys := getKeys(c.Root)
 	hash := map[string]*string{}
 	for _, key := range keys {
 		k := strings.Join(key, "-")
 		hash[k] = new(string)
-		val, _ := cfg.String(k)
+		val, _ := c.String(k)
 		flag.StringVar(hash[k], k, val, "")
 	}
 
 	flag.Parse()
 
 	flag.Visit(func(f *flag.Flag) {
-		name := strings.Replace(f.Name, "-", ".", -1)
-		cfg.Set(name, f.Value.String())
+		name := strings.ReplaceAll(f.Name, "-", ".")
+		_ = c.Set(name, f.Value.String())
 	})
 
-	return cfg
+	return c
 }
 
 // Args command line arguments, based on existing config keys.
-func (cfg *Config) Args(args ...string) *Config {
+func (c *Config) Args(args ...string) *Config {
 	if len(args) <= 1 {
-		return cfg
+		return c
 	}
 
-	keys := getKeys(cfg.Root)
+	keys := getKeys(c.Root)
 	hash := map[string]*string{}
-	_flag := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	var _err bytes.Buffer
-	_flag.SetOutput(&_err)
+	f := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	var err bytes.Buffer
+	f.SetOutput(&err)
 	for _, key := range keys {
 		k := strings.Join(key, "-")
 		hash[k] = new(string)
-		val, _ := cfg.String(k)
-		_flag.StringVar(hash[k], k, val, "")
+		val, _ := c.String(k)
+		f.StringVar(hash[k], k, val, "")
 	}
 
-	cfg.lastErr = _flag.Parse(args[1:])
+	c.lastErr = f.Parse(args[1:])
 
-	_flag.Visit(func(f *flag.Flag) {
-		name := strings.Replace(f.Name, "-", ".", -1)
-		cfg.Set(name, f.Value.String())
+	f.Visit(func(f *flag.Flag) {
+		name := strings.ReplaceAll(f.Name, "-", ".")
+		_ = c.Set(name, f.Value.String())
 	})
 
-	return cfg
+	return c
 }
 
 // Get all keys for given interface
-func getKeys(source interface{}, base ...string) [][]string {
-	acc := [][]string{}
+func getKeys(source any, base ...string) [][]string {
+	var acc [][]string
 
 	// Copy "base" so that underlying slice array is not
 	// modified in recursive calls
@@ -124,12 +123,12 @@ func getKeys(source interface{}, base ...string) [][]string {
 	copy(nextBase, base)
 
 	switch c := source.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		for k, v := range c {
 			keys := getKeys(v, append(nextBase, k)...)
 			acc = append(acc, keys...)
 		}
-	case []interface{}:
+	case []any:
 		for i, v := range c {
 			k := strconv.Itoa(i)
 			keys := getKeys(v, append(nextBase, k)...)
@@ -143,8 +142,8 @@ func getKeys(source interface{}, base ...string) [][]string {
 }
 
 // Bool returns a bool according to a dotted path.
-func (cfg *Config) Bool(path string) (bool, error) {
-	n, err := Get(cfg.Root, path)
+func (c *Config) Bool(path string) (bool, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return false, err
 	}
@@ -172,8 +171,8 @@ func (c *Config) UBool(path string, defaults ...bool) bool {
 }
 
 // Float64 returns a float64 according to a dotted path.
-func (cfg *Config) Float64(path string) (float64, error) {
-	n, err := Get(cfg.Root, path)
+func (c *Config) Float64(path string) (float64, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return 0, err
 	}
@@ -199,23 +198,23 @@ func (c *Config) UFloat64(path string, defaults ...float64) float64 {
 	for _, def := range defaults {
 		return def
 	}
-	return float64(0)
+	return 0
 }
 
 // Int returns an int according to a dotted path.
-func (cfg *Config) Int(path string) (int, error) {
-	n, err := Get(cfg.Root, path)
+func (c *Config) Int(path string) (int, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return 0, err
 	}
 	switch n := n.(type) {
 	case float64:
-		// encoding/json unmarshals numbers into floats, so we compare
+		// encoding/json unmarshal numbers into floats, so we compare
 		// the string representation to see if we can return an int.
 		if i := int(n); fmt.Sprint(i) == fmt.Sprint(n) {
 			return i, nil
 		} else {
-			return 0, fmt.Errorf("Value can't be converted to int: %v", n)
+			return 0, fmt.Errorf("value can't be converted to int: %v", n)
 		}
 	case int:
 		return n, nil
@@ -243,20 +242,20 @@ func (c *Config) UInt(path string, defaults ...int) int {
 	return 0
 }
 
-// List returns a []interface{} according to a dotted path.
-func (cfg *Config) List(path string) ([]interface{}, error) {
-	n, err := Get(cfg.Root, path)
+// List returns a []any according to a dotted path.
+func (c *Config) List(path string) ([]any, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return nil, err
 	}
-	if value, ok := n.([]interface{}); ok {
+	if value, ok := n.([]any); ok {
 		return value, nil
 	}
-	return nil, typeMismatch("[]interface{}", n)
+	return nil, typeMismatch("[]any", n)
 }
 
-// UList returns a []interface{} according to a dotted path or defaults or []interface{}.
-func (c *Config) UList(path string, defaults ...[]interface{}) []interface{} {
+// UList returns a []any according to a dotted path or defaults or []any.
+func (c *Config) UList(path string, defaults ...[]any) []any {
 	value, err := c.List(path)
 
 	if err == nil {
@@ -266,23 +265,23 @@ func (c *Config) UList(path string, defaults ...[]interface{}) []interface{} {
 	for _, def := range defaults {
 		return def
 	}
-	return make([]interface{}, 0)
+	return make([]any, 0)
 }
 
-// Map returns a map[string]interface{} according to a dotted path.
-func (cfg *Config) Map(path string) (map[string]interface{}, error) {
-	n, err := Get(cfg.Root, path)
+// Map returns a map[string]any according to a dotted path.
+func (c *Config) Map(path string) (map[string]any, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return nil, err
 	}
-	if value, ok := n.(map[string]interface{}); ok {
+	if value, ok := n.(map[string]any); ok {
 		return value, nil
 	}
-	return nil, typeMismatch("map[string]interface{}", n)
+	return nil, typeMismatch("map[string]any", n)
 }
 
-// UMap returns a map[string]interface{} according to a dotted path or default or map[string]interface{}.
-func (c *Config) UMap(path string, defaults ...map[string]interface{}) map[string]interface{} {
+// UMap returns a map[string]any according to a dotted path or default or map[string]any.
+func (c *Config) UMap(path string, defaults ...map[string]any) map[string]any {
 	value, err := c.Map(path)
 
 	if err == nil {
@@ -292,12 +291,12 @@ func (c *Config) UMap(path string, defaults ...map[string]interface{}) map[strin
 	for _, def := range defaults {
 		return def
 	}
-	return map[string]interface{}{}
+	return map[string]any{}
 }
 
 // String returns a string according to a dotted path.
-func (cfg *Config) String(path string) (string, error) {
-	n, err := Get(cfg.Root, path)
+func (c *Config) String(path string) (string, error) {
+	n, err := Get(c.Root, path)
 	if err != nil {
 		return "", err
 	}
@@ -326,7 +325,7 @@ func (c *Config) UString(path string, defaults ...string) string {
 
 // Copy returns a deep copy with given path or without.
 func (c *Config) Copy(dottedPath ...string) (*Config, error) {
-	toJoin := []string{}
+	var toJoin []string
 	for _, part := range dottedPath {
 		if len(part) != 0 {
 			toJoin = append(toJoin, part)
@@ -336,7 +335,7 @@ func (c *Config) Copy(dottedPath ...string) (*Config, error) {
 	var err error
 	var path = strings.Join(toJoin, ".")
 	var cfg = c
-	var root = ""
+	var root string
 
 	if len(path) > 0 {
 		if cfg, err = c.Get(path); err != nil {
@@ -350,39 +349,166 @@ func (c *Config) Copy(dottedPath ...string) (*Config, error) {
 	return ParseYaml(root)
 }
 
-// Extend returns extended copy of current config with applied
-// values from the given config instance. Note that if you extend
-// with different structure you will get an error. See: `.Set()` method
-// for details.
+// Extend extends the current config with the given config.
+//
+// Extend will merge arrays in the source config into arrays in the target config.
+// If a key in the source config is not present in the target config, it will be
+// added. If a key is present in both the source and target config and is not an
+// array, the value from the source config will be used.
+//
+// This is useful for extending a base configuration with additional configuration
+// options.
 func (c *Config) Extend(cfg *Config) (*Config, error) {
+	// First create a deep copy of the current config
 	n, err := c.Copy()
 	if err != nil {
 		return nil, err
 	}
 
+	// Find all arrays in the source config
+	arrayPaths := findArrayPaths(cfg.Root)
+	processedPaths := make(map[string]bool)
+
+	// Process arrays first to ensure they are properly merged
+	for _, path := range arrayPaths {
+		if path == "" {
+			continue // Skip the root path
+		}
+
+		// Get the array from the source config
+		sourceArr, err := cfg.List(path)
+		if err != nil {
+			return nil, err
+		}
+
+		// Try to get the array from the target config
+		targetArr, err := n.List(path)
+		if err == nil {
+			// We have arrays in both source and target, merge them
+			mergedArr := make([]any, len(targetArr))
+			copy(mergedArr, targetArr)
+
+			// Override existing elements and append new ones
+			for i, item := range sourceArr {
+				if i < len(mergedArr) {
+					// Override existing element
+					mergedArr[i] = item
+				} else {
+					// Append new element
+					mergedArr = append(mergedArr, item)
+				}
+			}
+
+			// Set the merged array in the target config
+			if err := n.Set(path, mergedArr); err != nil {
+				return nil, err
+			}
+		} else {
+			// Target doesn't have an array at this path, just set the source array
+			if err := n.Set(path, sourceArr); err != nil {
+				return nil, err
+			}
+		}
+
+		// Mark this path as processed
+		processedPaths[path] = true
+	}
+
+	// Process all other keys from the source config
 	keys := getKeys(cfg.Root)
 	for _, key := range keys {
 		k := strings.Join(key, ".")
+
+		// Skip paths that are arrays or elements of arrays we've already processed
+		skipPath := false
+		for path := range processedPaths {
+			if k == path || strings.HasPrefix(k, path+".") {
+				skipPath = true
+				break
+			}
+		}
+
+		if skipPath {
+			continue
+		}
+
+		// Get the value from the source config
 		i, err := Get(cfg.Root, k)
 		if err != nil {
 			return nil, err
 		}
+
+		// Set the value in the target config
 		if err := n.Set(k, i); err != nil {
 			return nil, err
 		}
 	}
+
 	return n, nil
 }
 
-// typeMismatch returns an error for an expected type.
-func typeMismatch(expected string, got interface{}) error {
-	return fmt.Errorf("Type mismatch: expected %s; got %T", expected, got)
+// findArrayPaths finds all paths in the config that are arrays
+func findArrayPaths(root any) []string {
+	var paths []string
+	findArrayPathsRecursive(root, "", &paths)
+	return paths
 }
 
-// Fetching -------------------------------------------------------------------
+// findArrayPathsRecursive is a helper function for findArrayPaths
+func findArrayPathsRecursive(value any, path string, paths *[]string) {
+	switch v := value.(type) {
+	case []any:
+		*paths = append(*paths, path)
+	case map[string]any:
+		for k, val := range v {
+			newPath := path
+			if newPath != "" {
+				newPath += "."
+			}
+			newPath += k
+			findArrayPathsRecursive(val, newPath, paths)
+		}
+	}
+}
 
-// Get returns a child of the given value according to a dotted path.
-func Get(cfg interface{}, path string) (interface{}, error) {
+// typeMismatch returns an error for an expected type.
+func typeMismatch(expected string, got any) error {
+	return fmt.Errorf("type mismatch: expected %s; got %T", expected, got)
+}
+
+// Get returns a value according to a dotted path.
+//
+// The path is split into parts on the dot character. If a part is an empty
+// string, it is removed from the path. If the first part is an empty string,
+// it is treated as a noop.
+//
+// The value is then retrieved from the configuration using the resulting
+// path. If the path is invalid (i.e. a nonexistent map key or an out-of-range
+// list index), an error is returned.
+//
+// The function handles the following types:
+//
+// - map[string]any
+// - []any
+//
+// If the value at the given path is not one of the above types, an
+// error is returned.
+//
+// Examples:
+//
+//	config := map[string]interface{}{
+//	    "database": map[string]interface{}{
+//	        "host": "localhost",
+//	    },
+//	}
+//
+// value, err := Get(config, "database.host")
+// // value is "localhost"
+//
+// value, err := Get(config, "database.ports.0")
+// // err is a type mismatch error, because config["database"]["ports"] is
+// // not a list
+func Get(cfg any, path string) (any, error) {
 	parts := splitKeyOnParts(path)
 	// Normalize path.
 	for k, v := range parts {
@@ -390,36 +516,36 @@ func Get(cfg interface{}, path string) (interface{}, error) {
 			if k == 0 {
 				parts = parts[1:]
 			} else {
-				return nil, fmt.Errorf("Invalid path %q", path)
+				return nil, fmt.Errorf("invalid path %q", path)
 			}
 		}
 	}
 	// Get the value.
 	for pos, part := range parts {
 		switch c := cfg.(type) {
-		case []interface{}:
-			if i, error := strconv.ParseInt(part, 10, 0); error == nil {
+		case []any:
+			if i, err := strconv.ParseInt(part, 10, 0); err == nil {
 				if int(i) < len(c) {
 					cfg = c[i]
 				} else {
 					return nil, fmt.Errorf(
-						"Index out of range at %q: list has only %v items",
+						"index out of range at %q: list has only %v items",
 						strings.Join(parts[:pos+1], "."), len(c))
 				}
 			} else {
-				return nil, fmt.Errorf("Invalid list index at %q",
+				return nil, fmt.Errorf("invalid list index at %q",
 					strings.Join(parts[:pos+1], "."))
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			if value, ok := c[part]; ok {
 				cfg = value
 			} else {
-				return nil, fmt.Errorf("Nonexistent map key at %q",
+				return nil, fmt.Errorf("nonexistent map key at %q",
 					strings.Join(parts[:pos+1], "."))
 			}
 		default:
 			return nil, fmt.Errorf(
-				"Invalid type at %q: expected []interface{} or map[string]interface{}; got %T",
+				"invalid type at %q: expected []any or map[string]any; got %T",
 				strings.Join(parts[:pos+1], "."), cfg)
 		}
 	}
@@ -428,7 +554,7 @@ func Get(cfg interface{}, path string) (interface{}, error) {
 }
 
 func splitKeyOnParts(key string) []string {
-	parts := []string{}
+	var parts []string
 
 	bracketOpened := false
 	var buffer bytes.Buffer
@@ -454,88 +580,89 @@ func splitKeyOnParts(key string) []string {
 	return parts
 }
 
-// Set returns an error, in case when it is not possible to
-// establish the value obtained in accordance with given dotted path.
-func Set(cfg interface{}, path string, value interface{}) error {
+// Set sets a value in a nested configuration structure
+// according to a path specified in dotted notation. The
+// `cfg` parameter can be a map or a slice, and the `path`
+// is a string representing keys or indices separated by dots.
+// If the path leads to a nonexistent key or index, the
+// necessary maps or slices are created. This function
+// returns an error if the path is invalid or if a type
+// mismatch occurs at any part of the path.
+func Set(cfg any, path string, value any) error {
 	parts := strings.Split(path, ".")
 	// Normalize path.
 	for k, v := range parts {
 		if v == "" {
-			if k == 0 {
-				parts = parts[1:]
-			} else {
-				return fmt.Errorf("Invalid path %q", path)
+			if k != 0 {
+				return fmt.Errorf("invalid path %q", path)
 			}
+
+			parts = parts[1:]
 		}
 	}
 
-	point := &cfg
-	for pos, part := range parts {
-		switch c := (*point).(type) {
-		case []interface{}:
-			if i, error := strconv.ParseInt(part, 10, 0); error == nil {
-				// 1. normalize slice capacity
-				if int(i) >= cap(c) {
-					c = append(c, make([]interface{}, int(i)-cap(c)+1, int(i)-cap(c)+1)...)
-				}
-
-				// 2. set value or go further
-				if pos+1 == len(parts) {
-					c[i] = value
-				} else {
-
-					// if exists just pick the pointer
-					if va := c[i]; va != nil {
-						point = &va
-					} else {
-						// is next part slice or map?
-						if i, err := strconv.ParseInt(parts[pos+1], 10, 0); err == nil {
-							va = make([]interface{}, int(i)+1, int(i)+1)
-						} else {
-							va = make(map[string]interface{})
-						}
-						c[i] = va
-						point = &va
-					}
-
-				}
-
-			} else {
-				return fmt.Errorf("Invalid list index at %q",
-					strings.Join(parts[:pos+1], "."))
-			}
-		case map[string]interface{}:
-			if pos+1 == len(parts) {
-				c[part] = value
-			} else {
-				// if exists just pick the pointer
-				if va, ok := c[part]; ok {
-					point = &va
-				} else {
-					// is next part slice or map?
-					if i, err := strconv.ParseInt(parts[pos+1], 10, 0); err == nil {
-						va = make([]interface{}, int(i)+1, int(i)+1)
-					} else {
-						va = make(map[string]interface{})
-					}
-					c[part] = va
-					point = &va
-				}
-			}
-		default:
-			return fmt.Errorf(
-				"Invalid type at %q: expected []interface{} or map[string]interface{}; got %T",
-				strings.Join(parts[:pos+1], "."), c)
-		}
+	if len(parts) == 0 {
+		return nil
 	}
 
-	return nil
+	// Handle the root case
+	switch c := cfg.(type) {
+	case map[string]any:
+		if len(parts) == 1 {
+			c[parts[0]] = value
+			return nil
+		}
+		if v, ok := c[parts[0]]; ok {
+			return Set(v, strings.Join(parts[1:], "."), value)
+		}
+		// If the path doesn't exist, create it
+		if i, err := strconv.Atoi(parts[1]); err == nil {
+			// Next part is a numeric index, create a slice
+			newSlice := make([]any, i+1)
+			c[parts[0]] = newSlice
+			return Set(newSlice, strings.Join(parts[1:], "."), value)
+		}
+		// Next part is a string key, create a map
+		newMap := make(map[string]any)
+		c[parts[0]] = newMap
+		return Set(newMap, strings.Join(parts[1:], "."), value)
+	case []any:
+		// First part must be a numeric index for slices
+		i, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return fmt.Errorf("invalid list index at %q", parts[0])
+		}
+		// Ensure the slice is large enough
+		for len(c) <= i {
+			c = append(c, nil)
+		}
+		if len(parts) == 1 {
+			c[i] = value
+			return nil
+		}
+		// If the path doesn't exist or is nil, create it
+		if c[i] == nil {
+			if j, err := strconv.Atoi(parts[1]); err == nil {
+				// Next part is a numeric index, create a slice
+				newSlice := make([]any, j+1)
+				c[i] = newSlice
+			} else {
+				// Next part is a string key, create a map
+				newMap := make(map[string]any)
+				c[i] = newMap
+			}
+		}
+		return Set(c[i], strings.Join(parts[1:], "."), value)
+	default:
+		return fmt.Errorf("invalid type at root: expected []any or map[string]any; got %T", cfg)
+	}
 }
 
-// Parsing --------------------------------------------------------------------
-
-// Must is a wrapper for parsing functions to be used during initialization.
-// It panics on failure.
+// Must is a helper that wraps a call to a function returning (*Config, error)
+// and panics if the error is non-nil. It is intended for use in variable
+// initializations such as
+//
+//	var cfg = config.Must(config.ParseYaml(yamlString))
 func Must(cfg *Config, err error) *Config {
 	if err != nil {
 		panic(err)
@@ -543,40 +670,47 @@ func Must(cfg *Config, err error) *Config {
 	return cfg
 }
 
-// normalizeValue normalizes a unmarshalled value. This is needed because
-// encoding/json doesn't support marshalling map[interface{}]interface{}.
-func normalizeValue(value interface{}) (interface{}, error) {
+// normalizeValue takes a value and recursively normalizes it, converting
+// any map[any]any to map[string]any, and any []any to []any, and returning
+// an error if any value is of an unsupported type.
+//
+// This function is intended for use when the contents of the value are
+// unknown, and the value needs to be converted to a form that can be
+// safely used as a configuration. For example, if the value is a JSON
+// object received from an untrusted source, this function can be used to
+// convert it to a form that can be safely used as a configuration.
+func normalizeValue(value any) (any, error) {
 	switch value := value.(type) {
-	case map[interface{}]interface{}:
-		node := make(map[string]interface{}, len(value))
+	case map[any]any:
+		node := make(map[string]any, len(value))
 		for k, v := range value {
 			key, ok := k.(string)
 			if !ok {
-				return nil, fmt.Errorf("Unsupported map key: %#v", k)
+				return nil, fmt.Errorf("unsupported map key: %#v", k)
 			}
 			item, err := normalizeValue(v)
 			if err != nil {
-				return nil, fmt.Errorf("Unsupported map value: %#v", v)
-			}
-			node[key] = item
-		}
-		return node, nil
-	case map[string]interface{}:
-		node := make(map[string]interface{}, len(value))
-		for key, v := range value {
-			item, err := normalizeValue(v)
-			if err != nil {
-				return nil, fmt.Errorf("Unsupported map value: %#v", v)
+				return nil, fmt.Errorf("unsupported map value: %#v", v)
 			}
 			node[key] = item
 		}
 		return node, nil
-	case []interface{}:
-		node := make([]interface{}, len(value))
+	case map[string]any:
+		node := make(map[string]any, len(value))
 		for key, v := range value {
 			item, err := normalizeValue(v)
 			if err != nil {
-				return nil, fmt.Errorf("Unsupported list item: %#v", v)
+				return nil, fmt.Errorf("unsupported map value: %#v", v)
+			}
+			node[key] = item
+		}
+		return node, nil
+	case []any:
+		node := make([]any, len(value))
+		for key, v := range value {
+			item, err := normalizeValue(v)
+			if err != nil {
+				return nil, fmt.Errorf("unsupported list item: %#v", v)
 			}
 			node[key] = item
 		}
@@ -584,19 +718,29 @@ func normalizeValue(value interface{}) (interface{}, error) {
 	case bool, float64, int, string, nil:
 		return value, nil
 	}
-	return nil, fmt.Errorf("Unsupported type: %T", value)
+	return nil, fmt.Errorf("unsupported type: %T", value)
 }
 
-// JSON -----------------------------------------------------------------------
-
-// ParseJson reads a JSON configuration from the given string.
+// ParseJson parses a JSON configuration from the given string.
+//
+// The contents of the string should be a valid JSON object. The function
+// will return an error if the JSON is invalid.
+//
+// The resulting configuration is returned as a *Config, which can be used
+// to access the configuration values.
 func ParseJson(cfg string) (*Config, error) {
 	return parseJson([]byte(cfg))
 }
 
 // ParseJsonFile reads a JSON configuration from the given filename.
+//
+// The contents of the file should be a valid JSON object. The function
+// will return an error if the JSON is invalid.
+//
+// The resulting configuration is returned as a *Config, which can be used
+// to access the configuration values.
 func ParseJsonFile(filename string) (*Config, error) {
-	cfg, err := ioutil.ReadFile(filename)
+	cfg, err := os.ReadFile(filepath.Clean(filename))
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +749,7 @@ func ParseJsonFile(filename string) (*Config, error) {
 
 // parseJson performs the real JSON parsing.
 func parseJson(cfg []byte) (*Config, error) {
-	var out interface{}
+	var out any
 	var err error
 	if err = json.Unmarshal(cfg, &out); err != nil {
 		return nil, err
@@ -617,7 +761,12 @@ func parseJson(cfg []byte) (*Config, error) {
 }
 
 // RenderJson renders a JSON configuration.
-func RenderJson(cfg interface{}) (string, error) {
+//
+// The given configuration is marshaled into a JSON object, and the
+// resulting JSON is returned as a string.
+//
+// If the configuration cannot be marshaled, the function returns an error.
+func RenderJson(cfg any) (string, error) {
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return "", err
@@ -625,30 +774,63 @@ func RenderJson(cfg interface{}) (string, error) {
 	return string(b), nil
 }
 
-// YAML -----------------------------------------------------------------------
-
-// ParseYamlBytes reads a YAML configuration from the given []byte.
+// ParseYamlBytes parses a YAML configuration from the given byte slice.
+//
+// The contents of the byte slice should be a valid YAML object. The function
+// will return an error if the YAML is invalid.
+//
+// The resulting configuration is returned as a *Config, which can be used
+// to access the configuration values.
 func ParseYamlBytes(cfg []byte) (*Config, error) {
 	return parseYaml(cfg)
 }
 
-// ParseYaml reads a YAML configuration from the given string.
+// ParseYaml parses a YAML configuration from the given string.
+//
+// The contents of the string should be a valid YAML object. The function
+// will return an error if the YAML is invalid.
+//
+// The resulting configuration is returned as a *Config, which can be used
+// to access the configuration values.
 func ParseYaml(cfg string) (*Config, error) {
 	return parseYaml([]byte(cfg))
 }
 
 // ParseYamlFile reads a YAML configuration from the given filename.
+//
+// The contents of the file should be a valid YAML object. The function
+// will return an error if the YAML is invalid.
+//
+// The resulting configuration is returned as a *Config, which can be used
+// to access the configuration values.
 func ParseYamlFile(filename string) (*Config, error) {
-	cfg, err := ioutil.ReadFile(filename)
+	cfg, err := os.ReadFile(filepath.Clean(filename))
 	if err != nil {
 		return nil, err
 	}
 	return parseYaml(cfg)
 }
 
+// RenderYaml marshals the given configuration into a YAML formatted string.
+//
+// The cfg parameter can be any data structure that is compatible with YAML
+// marshaling. If the configuration cannot be marshaled, the function returns
+// an error.
+//
+// Returns:
+//   - string: A YAML formatted string representing the configuration.
+//   - error: An error object if marshaling fails, otherwise nil.
+func RenderYaml(cfg any) (string, error) {
+	b, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // parseYaml performs the real YAML parsing.
 func parseYaml(cfg []byte) (*Config, error) {
-	var out interface{}
+	var out any
 	var err error
 	if err = yaml.Unmarshal(cfg, &out); err != nil {
 		return nil, err
@@ -657,13 +839,4 @@ func parseYaml(cfg []byte) (*Config, error) {
 		return nil, err
 	}
 	return &Config{Root: out}, nil
-}
-
-// RenderYaml renders a YAML configuration.
-func RenderYaml(cfg interface{}) (string, error) {
-	b, err := yaml.Marshal(cfg)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
