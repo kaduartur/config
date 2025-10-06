@@ -2,6 +2,7 @@
 
 [![GoDoc](https://pkg.go.dev/badge/github.com/kaduartur/config)](https://pkg.go.dev/github.com/kaduartur/config)
 [![CodeFactor](https://www.codefactor.io/repository/github/kaduartur/config/badge)](https://www.codefactor.io/repository/github/kaduartur/config)
+[![codecov](https://codecov.io/gh/kaduartur/config/graph/badge.svg?token=DPUTJ35TOB)](https://codecov.io/gh/kaduartur/config)
 
 Package `config` provides convenient access methods for configuration management stored as JSON or YAML with support for nested values via dotted path notation.
 
