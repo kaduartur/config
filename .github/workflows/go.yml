@@ -21,4 +21,9 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test ./... -race
+        run: go test ./... -coverprofile=coverage.txt -covermode=atomic -race -count=1 -shuffle=on
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
